@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    overscroll-behavior: none;
+  }
+  main > :first-child {
+    margin-top: 0 !important;
+  }
+  main > :last-child {
+    margin-bottom: 0 !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #11072a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #392f53;
+  border: 1px solid #000000;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00f0ff;
+}
+
+@keyframes crt-scan {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 100%; }
+}
+
+@keyframes blink-pixel {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.pixel-cursor {
+  display: none;
+}
+
+.group:hover .pixel-cursor,
+[data-active="true"] .pixel-cursor {
+  display: inline-block;
+  animation: blink-pixel 0.8s infinite steps(1);
+}
+
+.blink-fast {
+  animation: blink-pixel 1s infinite steps(1);
+}
+
+/* Pixel Button Utilities */
+.pixel-btn {
+  transition: none;
+}
+.pixel-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0px #000000;
+}
+
+/* Retro Arcade Utilities */
+.pixel-dot-grid {
+  background-image: radial-gradient(#00f0ff 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: 0 0;
+}
+
+.scanline-layer {
+  background: linear-gradient(rgba(18, 10, 36, 0) 50%, rgba(0, 0, 0, 0.3) 50%);
+  background-size: 100% 4px;
+}
+
+.arcade-shadow {
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.arcade-shadow-sm {
+  box-shadow: 2px 2px 0px #000000;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-marquee {
+  animation: marquee 24s linear infinite;
+}

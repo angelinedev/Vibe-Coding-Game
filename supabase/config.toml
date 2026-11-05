@@ -1,0 +1,39 @@
+# Supabase configuration for Prompt Arena Vibe Coding contest
+
+project_id = "Vibe-Coding"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.seed]
+# seed_dev.sql is strictly manual and MUST NOT auto-run on db reset.
+# Database reset provides a clean contest-ready environment.
+enabled = false
+sql_paths = []
+
+[auth]
+enabled = true
+enable_anonymous_sign_ins = true
+site_url = "http://localhost:5174"
+additional_redirect_urls = ["http://localhost:5174"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = false
+
+[auth.anonymous_users]
+# Enable anonymous sign-in exclusively for participants
+enabled = true
