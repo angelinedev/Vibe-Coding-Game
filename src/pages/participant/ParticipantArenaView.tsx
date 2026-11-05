@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParticipant } from '../../context/ParticipantContext';
 import { Question } from '../../types/database';
+import { parseQuestionTestCases } from '../../lib/testcases';
 
 export const ParticipantArenaView: React.FC = () => {
   const {
@@ -23,6 +24,11 @@ export const ParticipantArenaView: React.FC = () => {
   const liveQuestions = questions.filter(q => q.status === 'live');
   const availableQuestions = liveQuestions;
   const activeQuestion: Question | undefined = availableQuestions[selectedQuestionIndex];
+
+  const parsedTestCases = useMemo(() => {
+    if (!activeQuestion) return [];
+    return parseQuestionTestCases(activeQuestion.input_data, activeQuestion.expected_output);
+  }, [activeQuestion]);
 
   // Prompt text
   const [promptCode, setPromptCode] = useState<string>(
@@ -236,15 +242,64 @@ Input: {{query}}`
                     </p>
                   </div>
 
-                  {/* Sample Input Monospace Box */}
+                  {/* Public Sample Test Cases Showcase */}
                   <div className="flex flex-col gap-space-xs">
-                    <span className="font-label-md text-label-md text-on-surface-variant uppercase font-bold">
-                      Input Data
-                    </span>
-                    <div className="bg-surface-container-lowest p-space-sm shadow-sm relative overflow-hidden border border-black">
-                      <pre className="font-body-sm text-body-sm text-secondary overflow-x-auto whitespace-pre-wrap select-all font-mono">
-                        <code>{activeQuestion.input_data}</code>
-                      </pre>
+                    <div className="flex items-center justify-between">
+                      <span className="font-label-md text-label-md text-on-surface-variant uppercase font-bold">
+                        Sample Test Cases ({parsedTestCases.filter(t => t.is_public).length})
+                      </span>
+                      {parsedTestCases.some(t => !t.is_public) && (
+                        <span className="text-[10px] font-mono text-tertiary-fixed bg-surface-container-high px-2 py-0.5 border border-black">
+                          🔒 +{parsedTestCases.filter(t => !t.is_public).length} Hidden Test Cases
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
+                      {/* ONLY RENDER PUBLIC SAMPLE CASES IN THE QUESTION DESCRIPTION */}
+                      {parsedTestCases
+                        .filter(tc => tc.is_public)
+                        .map((tc, idx) => (
+                          <div
+                            key={tc.id || idx}
+                            className="bg-surface-container-lowest p-space-sm border border-black flex flex-col gap-1.5 shadow-sm"
+                          >
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-title-sm text-title-sm font-bold text-primary-container">
+                                Sample Case #{idx + 1}
+                              </span>
+                              <span className="px-1.5 py-0.2 font-label-sm text-[9px] uppercase border font-bold bg-secondary text-black border-black">
+                                Sample Case
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] text-on-surface-variant font-mono uppercase">Input:</span>
+                              <pre className="p-1.5 bg-surface-container-low text-tertiary-fixed font-mono text-[12px] overflow-x-auto whitespace-pre-wrap select-all">
+                                <code>{tc.input || '(empty)'}</code>
+                              </pre>
+                            </div>
+
+                            {tc.expected_output && (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-[10px] text-secondary font-mono uppercase">Expected Output:</span>
+                                <pre className="p-1.5 bg-surface-container-low text-secondary font-mono text-[12px] overflow-x-auto whitespace-pre-wrap select-all">
+                                  <code>{tc.expected_output}</code>
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                      {/* Discreet Notice for Hidden Cases */}
+                      {parsedTestCases.some(t => !t.is_public) && (
+                        <div className="p-2 bg-surface-container-low border border-black/50 text-[11px] font-mono text-on-surface-variant flex items-center gap-2">
+                          <span className="text-tertiary-fixed">🔒</span>
+                          <span>
+                            {parsedTestCases.filter(t => !t.is_public).length} hidden test case(s) will be evaluated when you run your prompt.
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -428,20 +483,145 @@ Input: {{query}}`
                   ))}
                 </div>
               ) : (
-                <div className="bg-surface-container-high p-space-lg shadow-xl flex flex-col items-center justify-center text-center gap-space-sm border-2 border-black">
-                  <div className={`flex items-center gap-space-xs font-headline-xl text-headline-xl font-bold ${
-                    activeRunResult.status === 'PASS' ? 'text-tertiary-fixed' : 'text-error'
+                <div className="flex flex-col gap-3">
+                  {/* Summary Verdict Banner */}
+                  <div className={`p-space-md border-2 border-black flex flex-col sm:flex-row items-center justify-between gap-space-sm shadow-md ${
+                    activeRunResult.status === 'PASS'
+                      ? 'bg-tertiary-container/30 border-tertiary-fixed text-tertiary-fixed'
+                      : activeRunResult.score > 0
+                      ? 'bg-secondary-container/30 border-secondary text-secondary'
+                      : 'bg-error-container/30 border-error text-error'
                   }`}>
-                    <span className="material-symbols-outlined text-[36px]">
-                      {activeRunResult.status === 'PASS' ? 'check_circle' : 'cancel'}
-                    </span>
-                    <span>{activeRunResult.status === 'PASS' ? 'Verdict: Pass' : 'Verdict: Failed'}</span>
+                    <div className="flex items-center gap-space-sm">
+                      <span className="material-symbols-outlined text-[32px]">
+                        {activeRunResult.status === 'PASS' ? 'verified' : activeRunResult.score > 0 ? 'published_with_changes' : 'cancel'}
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="font-headline-md text-headline-md font-bold uppercase">
+                          {activeRunResult.status === 'PASS'
+                            ? 'All Tests Passed'
+                            : activeRunResult.score > 0
+                            ? 'Partial Pass'
+                            : 'Evaluation Failed'}
+                        </span>
+                        <span className="text-[12px] font-mono text-on-surface">
+                          {activeRunResult.passRatio} • Latency: {activeRunResult.latency}ms
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className={`px-space-md py-1 font-title-sm text-title-sm font-bold uppercase border border-black shadow-sm ${
+                        activeRunResult.status === 'PASS'
+                          ? 'bg-tertiary-fixed text-black'
+                          : activeRunResult.score > 0
+                          ? 'bg-secondary text-black'
+                          : 'bg-error-container text-white'
+                      }`}>
+                        +{activeRunResult.score} PTS
+                      </span>
+                    </div>
                   </div>
-                  <div className={`font-headline-md text-headline-md px-space-lg py-space-xs font-bold uppercase shadow-md border border-black ${
-                    activeRunResult.status === 'PASS' ? 'bg-tertiary-container text-on-tertiary-container' : 'bg-error-container text-on-error-container'
-                  }`}>
-                    {activeRunResult.status === 'PASS' ? `+${activeRunResult.score} PTS AWARDED!` : '0 PTS AWARDED'}
-                  </div>
+
+                  {/* Individual Test Case Breakdown Cards */}
+                  {activeRunResult.testcases && activeRunResult.testcases.length > 0 && (
+                    <div className="flex flex-col gap-2 max-h-[340px] overflow-y-auto pr-1">
+                      {activeRunResult.testcases.map((tc, idx) => (
+                        <div
+                          key={tc.id || idx}
+                          className={`p-space-sm border-2 border-black flex flex-col gap-2 shadow-sm ${
+                            tc.passed
+                              ? 'bg-surface-container-lowest border-l-4 border-l-tertiary-fixed'
+                              : 'bg-surface-container-lowest border-l-4 border-l-error'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className={`material-symbols-outlined text-[18px] ${
+                                tc.passed ? 'text-tertiary-fixed' : 'text-error'
+                              }`}>
+                                {tc.passed ? 'check_circle' : 'cancel'}
+                              </span>
+                              <span className="font-title-sm text-title-sm font-bold text-on-surface">
+                                #{idx + 1} {tc.name}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className={`px-1.5 py-0.5 font-label-sm text-[8px] uppercase border font-bold ${
+                                tc.is_public
+                                  ? 'bg-secondary text-black border-black'
+                                  : 'bg-surface-container-high text-outline border-black'
+                              }`}>
+                                {tc.is_public ? 'Public Sample' : '🔒 Hidden Test'}
+                              </span>
+                              <span className={`px-2 py-0.5 font-label-sm text-[9px] uppercase font-bold border border-black ${
+                                tc.passed
+                                  ? 'bg-tertiary-fixed text-black'
+                                  : 'bg-error text-white'
+                              }`}>
+                                {tc.passed ? 'PASS' : 'FAIL'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* For Public Cases: Show Full Input & Output */}
+                          {tc.is_public ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[12px] font-mono">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-on-surface-variant uppercase">Input:</span>
+                                <pre className="p-1 bg-surface-container-low text-tertiary-fixed overflow-x-auto whitespace-pre-wrap">
+                                  <code>{tc.input || '(empty)'}</code>
+                                </pre>
+                              </div>
+
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-on-surface-variant uppercase">Your Output:</span>
+                                <pre className={`p-1 bg-surface-container-low overflow-x-auto whitespace-pre-wrap ${
+                                  tc.passed ? 'text-tertiary-fixed' : 'text-error'
+                                }`}>
+                                  <code>{tc.actual_output || '(no output)'}</code>
+                                </pre>
+                              </div>
+                            </div>
+                          ) : (
+                            /* For Hidden Cases: Input & Output are strictly masked */
+                            <div className="p-2 bg-surface-container-low border border-black/40 text-[11px] font-mono flex items-center justify-between">
+                              <span className="text-on-surface-variant flex items-center gap-1.5">
+                                <span>🔒</span>
+                                <span>Input &amp; Output Hidden</span>
+                              </span>
+                              <span className={tc.passed ? 'text-tertiary-fixed font-bold' : 'text-error font-bold'}>
+                                {tc.passed ? '✓ Passed evaluation' : '✗ Failed evaluation'}
+                              </span>
+                            </div>
+                          )}
+
+                          {tc.is_public && tc.expected_output && !tc.passed && (
+                            <div className="flex flex-col gap-0.5 text-[12px] font-mono border-t border-black/20 pt-1">
+                              <span className="text-[10px] text-secondary uppercase">Expected Output (Sample):</span>
+                              <pre className="p-1 bg-surface-container-low text-secondary overflow-x-auto whitespace-pre-wrap">
+                                <code>{tc.expected_output}</code>
+                              </pre>
+                            </div>
+                          )}
+
+                          {!tc.is_public && !tc.passed && (
+                            <div className="text-[10px] text-outline italic font-mono pt-0.5">
+                              Hidden test case failed. Check edge cases, boundary conditions, empty values, or data formatting.
+                            </div>
+                          )}
+
+                          {tc.error && (
+                            <div className="text-[11px] text-error font-mono">
+                              Error: {tc.error}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {activeRunResult.failureReason && (
                     <p className="font-body-sm text-body-sm text-error font-mono">
                       {activeRunResult.failureReason}

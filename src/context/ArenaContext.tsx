@@ -42,10 +42,13 @@ interface ArenaContextType {
   addOvertime: (minutes?: number) => Promise<void>;
   toggleLeaderboardFreeze: (freeze?: boolean) => Promise<void>;
   sendBroadcast: (message: string, priority?: 'normal' | 'flash' | 'alert') => Promise<void>;
+  clearBroadcast: () => Promise<void>;
   
   // Questions
   createQuestion: (newQ: Partial<Question> & { expected_output: string }) => Promise<void>;
   injectBonusQuestion: (questionId: string) => Promise<void>;
+  lockQuestion: (questionId: string) => Promise<void>;
+  deleteQuestion: (questionId: string) => Promise<void>;
   
   // Teams & Join Codes
   createTeam: (name: string, maxMembers?: number) => Promise<Team | null>;

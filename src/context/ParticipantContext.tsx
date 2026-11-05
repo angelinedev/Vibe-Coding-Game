@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { supabase, isSupabaseConfigured, INITIAL_CONTEST_STATE } from '../lib/supabase';
 import { Team, TeamMember, Attempt, Question, ContestState, Broadcast } from '../types/database';
 import { playSound } from '../lib/audio';
+import { TestCaseResult, parseQuestionTestCases, verifyTestCaseOutput } from '../lib/testcases';
 
 export type ParticipantTab = 'battle-arena' | 'leaderboard' | 'api-key-config' | 'quest-log';
 export type EmergencyModalType = 'none' | 'modal-timeout' | 'modal-dq' | 'modal-key' | 'modal-freeze';
@@ -37,7 +38,7 @@ export interface EvalRunResult {
   latency: number;
   rawPayload: any;
   stdoutLogs: string[];
-  testcases: { id: string; passed: boolean; label: string }[];
+  testcases: TestCaseResult[];
   failureReason?: string;
 }
 
@@ -507,7 +508,7 @@ export const ParticipantProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return res;
   };
 
-  // Real evaluation function
+  // Real multi-testcase evaluation function
   const evaluatePrompt = async (question: Question, promptTemplate: string): Promise<EvalRunResult> => {
     setIsEvaluating(true);
     playSound.click();
@@ -523,7 +524,7 @@ export const ParticipantProvider: React.FC<{ children: React.ReactNode }> = ({ c
         stdoutLogs: [
           `[${new Date().toISOString().slice(11, 19)}] EVALUATION ABORTED:`,
           'Gemini API Key is not configured.',
-          'Please navigate to [03 API KEY / CONFIG] and enter your key from Google AI Studio.',
+          'Please navigate to API Key config tab and enter your key from Google AI Studio.',
         ],
         testcases: [],
         failureReason: 'Missing Gemini API Key',
@@ -535,91 +536,130 @@ export const ParticipantProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
 
     const startTime = Date.now();
-    let emittedCode = '';
-    let parsedResult: any = null;
-    let isSuccess = false;
-    let evalError: string | undefined = undefined;
-    let activeModelName = selectedModel && !selectedModel.includes('1.5') ? selectedModel : 'gemini-2.5-flash';
-
+    const suiteTestCases = parseQuestionTestCases(question.input_data, question.expected_output);
+    const activeModelName = selectedModel && !selectedModel.includes('1.5') ? selectedModel : 'gemini-2.5-flash';
     const candidateModels = [activeModelName, 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
 
-    for (const model of candidateModels) {
-      try {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-        const finalPrompt = `${promptTemplate}\n\nTask Input: ${question.input_data}`;
+    const testcaseResults: TestCaseResult[] = [];
+    const stdoutLogs: string[] = [
+      `[${new Date().toISOString().slice(11, 19)}] STARTING TEST SUITE: ${suiteTestCases.length} TEST CASE(S)`,
+      `Target Engine: ${activeModelName.toUpperCase()}`,
+      '------------------------------------------------------------',
+    ];
 
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: finalPrompt }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 2048,
-            },
-          }),
-        });
+    let lastEmittedCode = '';
+    let lastParsedResult: any = null;
 
-        if (response.ok) {
-          activeModelName = model;
-          const data = await response.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          emittedCode = text;
+    // Execute each test case
+    for (let i = 0; i < suiteTestCases.length; i++) {
+      const tc = suiteTestCases[i];
+      const tcInput = tc.input?.trim() || '';
+      const finalPrompt = tcInput ? `${promptTemplate}\n\nTask Input:\n${tcInput}` : promptTemplate;
 
-          try {
-            const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            parsedResult = JSON.parse(cleaned);
-          } catch {
-            parsedResult = { rawText: text };
-          }
+      let emitted = '';
+      let testError: string | undefined = undefined;
+      let passed = false;
 
-          if (question.expected_output && question.expected_output.trim()) {
-            const expectedClean = question.expected_output.trim();
-            const actualClean = (typeof parsedResult === 'string' ? parsedResult : JSON.stringify(parsedResult)).trim();
-            isSuccess = actualClean === expectedClean || text.trim() === expectedClean;
+      for (const model of candidateModels) {
+        try {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: finalPrompt }] }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 2048,
+              },
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            emitted = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            lastEmittedCode = emitted;
+
+            try {
+              const cleaned = emitted.replace(/```json/g, '').replace(/```/g, '').trim();
+              lastParsedResult = JSON.parse(cleaned);
+            } catch {
+              lastParsedResult = { rawText: emitted };
+            }
+
+            // Verify output match
+            passed = await verifyTestCaseOutput(emitted, tc.expected_output, tc.output_hash);
+            testError = undefined;
+            break;
           } else {
-            isSuccess = true;
+            const errData = await response.json().catch(() => ({}));
+            testError = errData?.error?.message || `HTTP ${response.status}`;
           }
-          evalError = undefined;
-          break; // successfully evaluated
-        } else {
-          const errData = await response.json().catch(() => ({}));
-          evalError = errData?.error?.message || `HTTP ${response.status}`;
-          parsedResult = { error: evalError };
+        } catch (err: any) {
+          testError = err?.message || 'Failed to connect to Gemini API';
         }
-      } catch (err: any) {
-        evalError = err?.message || 'Failed to dispatch request to Gemini API.';
-        parsedResult = { error: evalError };
       }
+
+      testcaseResults.push({
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+        is_public: tc.is_public,
+        expected_output: tc.is_public ? tc.expected_output : undefined,
+        actual_output: emitted,
+        passed,
+        error: testError,
+      });
+
+      const visibilityTag = tc.is_public ? '[Public Sample]' : '[Hidden Test]';
+      const statusIcon = passed ? '✓ PASSED' : '✗ FAILED';
+      stdoutLogs.push(
+        `Case #${i + 1} ${visibilityTag} - ${tc.name}: ${statusIcon}${testError ? ` (${testError})` : ''}`
+      );
     }
 
     const elapsed = Date.now() - startTime;
+    const passedCount = testcaseResults.filter(r => r.passed).length;
+    const totalCount = testcaseResults.length;
+    const isSuccess = passedCount === totalCount && totalCount > 0;
+    const calculatedScore = totalCount > 0 ? Math.round((passedCount / totalCount) * question.max_points) : 0;
     const runId = `RUN #${String(historyRuns.length + 1).padStart(2, '0')}`;
-    const calculatedScore = isSuccess ? question.max_points : 0;
+
+    stdoutLogs.push('------------------------------------------------------------');
+    stdoutLogs.push(
+      `TEST VERDICT: ${passedCount}/${totalCount} Passed | Score: ${calculatedScore}/${question.max_points} PTS (${elapsed}ms)`
+    );
 
     const newRun: EvalRunResult = {
       runId,
       status: isSuccess ? 'PASS' : 'FAIL',
-      passRatio: isSuccess ? 'PASSED' : 'FAILED',
+      passRatio: `${passedCount} / ${totalCount} PASSED`,
       score: calculatedScore,
       latency: elapsed,
-      rawPayload: parsedResult,
-      stdoutLogs: [
-        `[${new Date().toISOString().slice(11, 19)}] LLM INFERENCE COMPLETED (${elapsed}ms)`,
-        `Target Model: ${selectedModel.toUpperCase()}`,
-        `Payload Tokens: ${emittedCode.length} characters emitted`,
-        evalError ? `[ERROR]: ${evalError}` : `Verdict: ${isSuccess ? 'PASS' : 'FAIL'} (Awarded: ${calculatedScore} PTS)`
-      ],
-      testcases: [
-        { id: 'TESTCASE-01', passed: isSuccess, label: isSuccess ? 'PASS' : 'FAIL' }
-      ],
-      failureReason: isSuccess ? undefined : evalError || 'Output did not match expected specification.',
+      rawPayload: lastParsedResult || { rawText: lastEmittedCode },
+      stdoutLogs,
+      testcases: testcaseResults,
+      failureReason: isSuccess
+        ? undefined
+        : `${totalCount - passedCount} of ${totalCount} test cases failed to produce the expected output.`,
     };
 
     setActiveRunResult(newRun);
     setHistoryRuns(prev => [newRun, ...prev]);
     setActiveConsoleTab('tab-result');
     setIsEvaluating(false);
+
+    // Update local team best score immediately
+    if (team && calculatedScore > (team.best_score || 0)) {
+      setTeam(prev => prev ? { ...prev, best_score: calculatedScore } : null);
+      setLeaderboardEntries(prev =>
+        prev.map(entry =>
+          entry.team_id === team.id
+            ? { ...entry, best_score: calculatedScore }
+            : entry
+        )
+      );
+    }
 
     // Record attempt to Supabase
     if (isSupabaseConfigured && team) {
@@ -629,10 +669,10 @@ export const ParticipantProvider: React.FC<{ children: React.ReactNode }> = ({ c
           user_id: member?.user_id || null,
           question_id: question.id,
           prompt: promptTemplate,
-          generated_code: emittedCode,
-          actual_output: null,
-          passed: false,
-          score: 0,
+          generated_code: lastEmittedCode,
+          actual_output: JSON.stringify(testcaseResults.map(r => ({ id: r.id, passed: r.passed }))),
+          passed: isSuccess,
+          score: calculatedScore,
         });
       } catch (e) {
         console.warn('Could not record attempt to Supabase:', e);

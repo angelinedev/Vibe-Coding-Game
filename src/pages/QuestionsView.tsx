@@ -3,6 +3,7 @@ import { useArena } from '../context/ArenaContext';
 import { Question, QuestionTier } from '../types/database';
 import { ForgeQuestionModal } from '../components/ForgeQuestionModal';
 import { playSound } from '../lib/audio';
+import { parseQuestionTestCases } from '../lib/testcases';
 import confetti from 'canvas-confetti';
 
 export const QuestionsView: React.FC = () => {
@@ -280,13 +281,43 @@ export const QuestionsView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <span className="font-['Press_Start_2P'] text-[8px] text-on-surface-variant uppercase">
-                    INPUT PAYLOAD
-                  </span>
-                  <pre className="bg-surface-container-lowest p-space-sm border border-black font-['Courier_Prime'] text-[13px] text-tertiary-fixed overflow-x-auto whitespace-pre-wrap">
-                    {activeSelected.input_data}
-                  </pre>
+                {/* Test Cases Inspector */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-['Press_Start_2P'] text-[8px] text-on-surface-variant uppercase">
+                      TEST CASES ({parseQuestionTestCases(activeSelected.input_data, activeSelected.expected_output).length})
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto">
+                    {parseQuestionTestCases(activeSelected.input_data, activeSelected.expected_output).map((tc, idx) => (
+                      <div key={tc.id || idx} className="bg-surface-container-lowest p-2 border border-black flex flex-col gap-1 text-[12px] font-mono">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-primary-container">
+                            #{idx + 1} {tc.name}
+                          </span>
+                          <span className={`px-1 text-[9px] uppercase font-bold border border-black ${
+                            tc.is_public ? 'bg-secondary text-black' : 'bg-error text-white'
+                          }`}>
+                            {tc.is_public ? 'Public' : 'Hidden'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-tertiary-fixed">
+                          <span className="text-on-surface-variant">Input:</span> {tc.input || '(empty)'}
+                        </div>
+                        {tc.expected_output && (
+                          <div className="text-[11px] text-secondary">
+                            <span className="text-on-surface-variant">Expected:</span> {tc.expected_output}
+                          </div>
+                        )}
+                        {!tc.is_public && tc.output_hash && (
+                          <div className="text-[10px] text-outline font-mono truncate">
+                            SHA: {tc.output_hash}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {activeSelected.expected_output && (
